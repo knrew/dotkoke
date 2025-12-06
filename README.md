@@ -8,7 +8,7 @@ Unix系OSのみ対象．
 ## インストール
 
 ```sh
-cargo install --path .
+cargo install --git https://github.com/knrew/dotkoke
 ```
 
 ## 設定ファイル
