@@ -1,0 +1,14 @@
+extends: default
+
+rules:
+  document-start: disable
+
+  line-length: disable
+
+  empty-lines:
+    max: 1
+    level: error
+
+  truthy:
+    check-keys: false
+    level: error
