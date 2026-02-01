@@ -8,12 +8,11 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  taplo:
-    runs-on: ubuntu-latest
+  toml:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -23,15 +22,22 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-taplo-0.10.0
           restore-keys: |
             ${{ runner.os }}-cargo-
-
       - uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
-
       - name: Install taplo
         run: |
           if ! command -v taplo >/dev/null || [[ "$(taplo --version)" != "taplo 0.10.0" ]]; then
-            cargo install taplo-cli --version 0.10.0 --locked
+            cargo +stable install taplo-cli --version 0.10.0 --locked
           fi
-
       - run: taplo fmt --check
+
+  yaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.14
+      - run: pip install yamllint==1.38.0
+      - run: yamllint .
