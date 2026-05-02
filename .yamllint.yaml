@@ -12,3 +12,7 @@ rules:
   truthy:
     check-keys: false
     level: error
+
+  quoted-strings:
+    quote-type: double
+    required: only-when-needed
