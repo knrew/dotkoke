@@ -56,7 +56,7 @@ dotfiles/
 ### install
 
 `dotfiles/home/`以下を走査して，対応する$HOME側にシンボリックリンクを作成する．
-既存ファイルが存在する場合，`backup_dir/YYYYmmdd_HHMM/...`へ移動してからリンクを作成する．
+既存ファイルまたはディレクトリが存在する場合，`backup_dir/YYYYmmdd_HHMM/...`へ移動してからリンクを作成する．
 
 - `dotkoke install`: 実際にリンクを作成する．
 - `dotkoke install --dry-run`: 実際の操作は行わず，処理予定内容を表示する．

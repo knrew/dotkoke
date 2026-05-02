@@ -124,31 +124,22 @@ fn main() -> Result<()> {
             unimplemented!();
         }
         Command::Install { dry_run } => {
-            if dry_run {
-                install(DryExecutor::new(config))?;
-            } else {
-                install(RealExecutor::new(config))?;
-            }
+            let context = CommandContext::new(config);
+            install(&context, execution_mode(dry_run))?;
         }
         Command::Add { path, dry_run } => {
-            if dry_run {
-                add(DryExecutor::new(config), path)?;
-            } else {
-                add(RealExecutor::new(config), path)?;
-            }
+            let context = CommandContext::new(config);
+            add(&context, path, execution_mode(dry_run))?;
         }
         Command::Remove { path, dry_run } => {
-            if dry_run {
-                remove(DryExecutor::new(config), path)?;
-            } else {
-                remove(RealExecutor::new(config), path)?;
-            }
+            let context = CommandContext::new(config);
+            remove(&context, path, execution_mode(dry_run))?;
         }
         Command::Clean {} => {
             unimplemented!();
         }
         Command::List {} => {
-            list(config)?;
+            list(&config)?;
         }
         Command::Status {} => {
             unimplemented!();
@@ -156,4 +147,12 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn execution_mode(dry_run: bool) -> ExecutionMode {
+    if dry_run {
+        ExecutionMode::DryRun
+    } else {
+        ExecutionMode::Real
+    }
 }
