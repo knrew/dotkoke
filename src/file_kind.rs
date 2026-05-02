@@ -1,7 +1,6 @@
-#![allow(dead_code)]
-
 use std::{fs, os::unix::fs::MetadataExt, path::Path};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileKind {
     Symlink,
     File,
@@ -45,20 +44,8 @@ pub fn is_file(path: impl AsRef<Path>) -> bool {
     matches!(file_kind(path), FileKind::File)
 }
 
-pub fn is_dir(path: impl AsRef<Path>) -> bool {
-    matches!(file_kind(path), FileKind::Dir)
-}
-
-pub fn is_unknown(path: impl AsRef<Path>) -> bool {
-    matches!(file_kind(path), FileKind::Unknown)
-}
-
 pub fn exists(path: impl AsRef<Path>) -> bool {
     !matches!(file_kind(path), FileKind::NotFound)
-}
-
-pub fn is_error_path(path: impl AsRef<Path>) -> bool {
-    matches!(file_kind(path), FileKind::Error)
 }
 
 /// `path`が壊れたシンボリックリンクならtrue

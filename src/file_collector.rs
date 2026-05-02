@@ -75,3 +75,47 @@ pub fn collect_files_and_links(path: impl AsRef<Path>) -> Result<(Vec<PathBuf>, 
 
     Ok((files, links))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, os::unix::fs::symlink};
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn collects_regular_files_and_symlinks_without_following_symlinks() {
+        let root = TempDir::new().unwrap();
+        let base = root.path().join("home");
+        let nested = base.join(".config/app");
+        let file = base.join(".zshrc");
+        let nested_file = nested.join("config.toml");
+        let symlink_path = base.join("linked");
+
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(&file, "zsh").unwrap();
+        fs::write(&nested_file, "config").unwrap();
+        symlink(&nested_file, &symlink_path).unwrap();
+
+        let (files, links) = collect_files_and_links(&base).unwrap();
+
+        assert_eq!(files, vec![nested_file, file]);
+        assert_eq!(links, vec![symlink_path]);
+    }
+
+    #[test]
+    fn collects_broken_symlink_as_link() {
+        let root = TempDir::new().unwrap();
+        let base = root.path().join("home");
+        let symlink_path = base.join("broken");
+
+        fs::create_dir_all(&base).unwrap();
+        symlink(base.join("missing"), &symlink_path).unwrap();
+
+        let (files, links) = collect_files_and_links(&base).unwrap();
+
+        assert!(files.is_empty());
+        assert_eq!(links, vec![symlink_path]);
+    }
+}

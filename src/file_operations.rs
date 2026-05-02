@@ -42,36 +42,6 @@ pub fn remove_symlink(path: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
-/// pathが不明なパスである場合に，それを削除する．
-/// 引数が不明なパス以外ならエラー．
-pub fn remove_unknown_path(path: impl AsRef<Path>) -> Result<()> {
-    let path = path.as_ref();
-
-    if !is_unknown(path) {
-        return Err(anyhow!("{} is not an unknown path.", path.display()));
-    }
-
-    fs::remove_file(path)
-        .with_context(|| format!("failed to remove unknown path: {}", path.display()))?;
-
-    Ok(())
-}
-
-/// pathがディレクトリである場合に，それをすべて削除．
-/// 引数がディレクトリ以外ならエラー．
-pub fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
-    let path = path.as_ref();
-
-    if !is_dir(path) {
-        return Err(anyhow!("{} is not a directory.", path.display()));
-    }
-
-    fs::remove_dir_all(path)
-        .with_context(|| format!("failed to remove dir: {}", path.display()))?;
-
-    Ok(())
-}
-
 /// `from`を`to`にrename(mv)する．
 /// `to`に既存ファイルがあるかどうかは確認しない．
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {

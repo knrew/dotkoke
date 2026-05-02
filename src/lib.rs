@@ -1,16 +1,17 @@
+mod action;
 mod add;
 mod config;
-mod executor;
 mod file_collector;
 mod file_kind;
 mod file_operations;
 mod install;
 mod list;
+mod paths;
 mod remove;
 
-pub use add::*;
-pub use config::*;
-pub use executor::*;
-pub use install::*;
-pub use list::*;
-pub use remove::*;
+pub use action::{Action, ExecutionMode, execute_actions};
+pub use add::{add, plan_add};
+pub use config::Config;
+pub use install::{CommandContext, install, plan_install};
+pub use list::list;
+pub use remove::{plan_remove, remove};

@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use chrono::Local;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -28,19 +27,18 @@ struct Toml {
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    // $HOME
-    pub home_dir: PathBuf,
-
-    // 使うことなさそうなのでprivate
-    #[allow(dead_code)]
+    // dotfiles レポジトリのルート．
     dotfiles_dir: PathBuf,
 
-    // バックアップは`backup_dir/YYYYmmdd_HHMM`以下に保存する．
-    pub backup_dir: PathBuf,
+    // $HOME．
+    home_dir: PathBuf,
+
+    // バックアップのルートディレクトリ．
+    backup_root_dir: PathBuf,
 
     // $HOMEのミラー．
     // dotfiles/home/
-    pub dotfiles_home_dir: PathBuf,
+    dotfiles_home_dir: PathBuf,
 }
 
 impl Config {
@@ -84,19 +82,12 @@ impl Config {
             return Err(anyhow!("{} is not directory.", home_dir.display()));
         }
 
-        let backup_dir = backup_dir
-            .canonicalize()
-            .with_context(|| {
-                format!(
-                    "invalid backup directory in config: {}",
-                    backup_dir.display()
-                )
-            })?
-            .join(Local::now().format("%Y%m%d_%H%M").to_string());
-
-        if backup_dir.is_dir() {
-            eprintln!("[warning] {} already exists.", backup_dir.display());
-        }
+        let backup_root_dir = backup_dir.canonicalize().with_context(|| {
+            format!(
+                "invalid backup directory in config: {}",
+                backup_dir.display()
+            )
+        })?;
 
         let dotfiles_home_dir = dotfiles_dir
             .join("home")
@@ -110,10 +101,108 @@ impl Config {
         let config = Config {
             dotfiles_dir,
             home_dir,
-            backup_dir,
+            backup_root_dir,
             dotfiles_home_dir,
         };
 
         Ok(config)
+    }
+
+    pub fn from_parts(
+        dotfiles_dir: PathBuf,
+        home_dir: PathBuf,
+        backup_root_dir: PathBuf,
+        dotfiles_home_dir: PathBuf,
+    ) -> Self {
+        Self {
+            dotfiles_dir,
+            home_dir,
+            backup_root_dir,
+            dotfiles_home_dir,
+        }
+    }
+
+    pub fn dotfiles_dir(&self) -> &Path {
+        &self.dotfiles_dir
+    }
+
+    pub fn home_dir(&self) -> &Path {
+        &self.home_dir
+    }
+
+    pub fn backup_root_dir(&self) -> &Path {
+        &self.backup_root_dir
+    }
+
+    pub fn dotfiles_home_dir(&self) -> &Path {
+        &self.dotfiles_home_dir
+    }
+
+    pub fn backup_dir_for_timestamp(&self, timestamp: &str) -> PathBuf {
+        self.backup_root_dir.join(timestamp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn reads_config_without_timestamping_backup_dir() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let home_dir = root.path().join("home");
+        let backup_dir = root.path().join("backup");
+        let config_path = root.path().join("dotkoke.toml");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::create_dir_all(&backup_dir).unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                "[general]\ndotfiles = {:?}\nhome = {:?}\nbackup_dir = {:?}\n",
+                dotfiles_dir, home_dir, backup_dir
+            ),
+        )
+        .unwrap();
+
+        let config = Config::read(config_path).unwrap();
+
+        assert_eq!(config.dotfiles_dir(), dotfiles_dir.canonicalize().unwrap());
+        assert_eq!(config.home_dir(), home_dir.canonicalize().unwrap());
+        assert_eq!(config.backup_root_dir(), backup_dir.canonicalize().unwrap());
+        assert_eq!(
+            config.dotfiles_home_dir(),
+            dotfiles_home_dir.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_missing_dotfiles_home_dir() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let home_dir = root.path().join("home");
+        let backup_dir = root.path().join("backup");
+        let config_path = root.path().join("dotkoke.toml");
+
+        fs::create_dir_all(&dotfiles_dir).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::create_dir_all(&backup_dir).unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                "[general]\ndotfiles = {:?}\nhome = {:?}\nbackup_dir = {:?}\n",
+                dotfiles_dir, home_dir, backup_dir
+            ),
+        )
+        .unwrap();
+
+        assert!(Config::read(config_path).is_err());
     }
 }

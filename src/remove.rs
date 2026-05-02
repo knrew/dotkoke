@@ -2,29 +2,121 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::{executor::Executor, file_kind::*};
+use crate::{
+    action::{Action, ExecutionMode, execute_actions},
+    file_kind::{FileKind, file_kind, is_broken_link, is_symlink_pointing_to},
+    install::CommandContext,
+    paths::PathResolver,
+};
 
-pub fn remove(executor: impl Executor, path: impl AsRef<Path>) -> Result<()> {
+pub fn remove(context: &CommandContext, path: impl AsRef<Path>, mode: ExecutionMode) -> Result<()> {
+    let actions = plan_remove(context, path)?;
+    execute_actions(&actions, mode)
+}
+
+pub fn plan_remove(context: &CommandContext, path: impl AsRef<Path>) -> Result<Vec<Action>> {
     let path = path.as_ref();
+
+    match file_kind(path) {
+        FileKind::Symlink => {
+            return Err(anyhow!("{} is a symlink.", path.display()));
+        }
+        FileKind::Dir => {
+            return Err(anyhow!("{} is not a file.", path.display()));
+        }
+        FileKind::Unknown => {
+            return Err(anyhow!("{} is an unknown file type.", path.display()));
+        }
+        FileKind::Error => {
+            return Err(anyhow!("cannot determine file kind of {}.", path.display()));
+        }
+        FileKind::NotFound | FileKind::File => {}
+    }
+
     let path = path
         .canonicalize()
         .with_context(|| format!("invalid path: {}", path.display()))?;
 
-    if !path.starts_with(executor.dotfiles_home_dir()) {
+    if !path.starts_with(context.config().dotfiles_home_dir()) {
         return Err(anyhow!(
             "{} is not in {}.",
             path.display(),
-            executor.dotfiles_home_dir().display()
+            context.config().dotfiles_home_dir().display()
         ));
     }
 
-    let to = executor.install_path(&path)?;
+    let to = PathResolver::new(context.config()).install_path(&path)?;
+    let mut actions = Vec::new();
 
     if is_symlink_pointing_to(&to, &path) || is_broken_link(&to) {
-        executor.remove_symlink_from_home(&to)?;
+        actions.push(Action::RemoveSymlink { path: to });
     }
 
-    executor.remove_file_from_dotfiles_home(path)?;
+    actions.push(Action::RemoveManagedFile { path });
 
-    Ok(())
+    Ok(actions)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, os::unix::fs::symlink};
+
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::Config;
+
+    fn context(root: &TempDir) -> CommandContext {
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let home_dir = root.path().join("home");
+        let backup_root_dir = root.path().join("backup");
+        let backup_dir = backup_root_dir.join("fixed");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::create_dir_all(&backup_root_dir).unwrap();
+
+        CommandContext::with_backup_dir(
+            Config::from_parts(dotfiles_dir, home_dir, backup_root_dir, dotfiles_home_dir),
+            backup_dir,
+        )
+    }
+
+    #[test]
+    fn plans_managed_file_removal_with_home_symlink() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let managed = context.config().dotfiles_home_dir().join(".zshrc");
+        let home = context.config().home_dir().join(".zshrc");
+
+        fs::write(&managed, "managed").unwrap();
+        symlink(&managed, &home).unwrap();
+
+        assert_eq!(
+            plan_remove(&context, &managed).unwrap(),
+            vec![
+                Action::RemoveSymlink { path: home },
+                Action::RemoveManagedFile { path: managed },
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_unrelated_home_symlink() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let managed = context.config().dotfiles_home_dir().join(".zshrc");
+        let other = context.config().dotfiles_home_dir().join(".zshenv");
+        let home = context.config().home_dir().join(".zshrc");
+
+        fs::write(&managed, "managed").unwrap();
+        fs::write(&other, "other").unwrap();
+        symlink(&other, &home).unwrap();
+
+        assert_eq!(
+            plan_remove(&context, &managed).unwrap(),
+            vec![Action::RemoveManagedFile { path: managed }]
+        );
+    }
 }
