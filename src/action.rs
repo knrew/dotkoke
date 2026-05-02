@@ -10,17 +10,9 @@ pub enum ExecutionMode {
     DryRun,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ActionOutput {
     pub show_skipped: bool,
-}
-
-impl Default for ActionOutput {
-    fn default() -> Self {
-        Self {
-            show_skipped: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
