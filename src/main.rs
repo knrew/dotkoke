@@ -27,6 +27,9 @@ enum Command {
     Install {
         #[arg(long)]
         dry_run: bool,
+
+        #[arg(long)]
+        show_skipped: bool,
     },
 
     /// `path`をdotfilesに加え管理対象に加える．
@@ -123,9 +126,16 @@ fn main() -> Result<()> {
         Command::Init {} => {
             unimplemented!();
         }
-        Command::Install { dry_run } => {
+        Command::Install {
+            dry_run,
+            show_skipped,
+        } => {
             let context = CommandContext::new(config);
-            install(&context, execution_mode(dry_run))?;
+            install_with_output(
+                &context,
+                execution_mode(dry_run),
+                ActionOutput { show_skipped },
+            )?;
         }
         Command::Add { path, dry_run } => {
             let context = CommandContext::new(config);

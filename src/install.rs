@@ -4,7 +4,7 @@ use anyhow::Result;
 use chrono::Local;
 
 use crate::{
-    action::{Action, ExecutionMode, execute_actions},
+    action::{Action, ActionOutput, ExecutionMode, execute_actions_with_output},
     config::Config,
     file_collector::collect_files_and_links,
     file_kind::{FileKind, file_kind, is_symlink_pointing_to},
@@ -43,8 +43,16 @@ impl CommandContext {
 }
 
 pub fn install(context: &CommandContext, mode: ExecutionMode) -> Result<()> {
+    install_with_output(context, mode, ActionOutput::default())
+}
+
+pub fn install_with_output(
+    context: &CommandContext,
+    mode: ExecutionMode,
+    output: ActionOutput,
+) -> Result<()> {
     let actions = plan_install(context)?;
-    execute_actions(&actions, mode)
+    execute_actions_with_output(&actions, mode, output)
 }
 
 pub fn plan_install(context: &CommandContext) -> Result<Vec<Action>> {
