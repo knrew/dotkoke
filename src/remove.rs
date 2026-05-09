@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fs, io, path::Path};
 
 use anyhow::{Context, Result, anyhow};
 
@@ -51,13 +51,31 @@ pub fn plan_remove(context: &CommandContext, path: impl AsRef<Path>) -> Result<V
     let to = PathResolver::new(context.config()).install_path(&path)?;
     let mut actions = Vec::new();
 
-    if is_symlink_pointing_to(&to, &path)? || broken_link_status(&to)? {
+    if should_remove_home_symlink(&to, &path)? {
         actions.push(Action::RemoveSymlink { path: to });
     }
 
     actions.push(Action::RemoveManagedFile { path });
 
     Ok(actions)
+}
+
+fn should_remove_home_symlink(to: &Path, managed: &Path) -> Result<bool> {
+    match fs::symlink_metadata(to) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(is_symlink_pointing_to(to, managed)? || broken_link_status(to)?)
+        }
+        Ok(_) => Ok(false),
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(e) => Err(e).with_context(|| format!("failed to inspect symlink: {}", to.display())),
+    }
 }
 
 #[cfg(test)]
@@ -160,6 +178,26 @@ mod tests {
                 Action::RemoveSymlink { path: home },
                 Action::RemoveManagedFile { path: managed },
             ]
+        );
+    }
+
+    #[test]
+    fn plans_managed_file_removal_when_home_parent_is_not_a_directory() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let managed = context
+            .config()
+            .dotfiles_home_dir()
+            .join(".config/app/config.toml");
+        let blocking_file = context.config().home_dir().join(".config");
+
+        fs::create_dir_all(managed.parent().unwrap()).unwrap();
+        fs::write(&managed, "managed").unwrap();
+        fs::write(&blocking_file, "blocking").unwrap();
+
+        assert_eq!(
+            plan_remove(&context, &managed).unwrap(),
+            vec![Action::RemoveManagedFile { path: managed }]
         );
     }
 
