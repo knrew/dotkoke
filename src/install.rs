@@ -203,7 +203,7 @@ mod tests {
         fs::create_dir_all(&backup_root_dir).unwrap();
 
         CommandContext::with_backup_dir(
-            Config::from_parts(dotfiles_dir, home_dir, backup_root_dir, dotfiles_home_dir),
+            Config::from_parts(dotfiles_dir, home_dir, backup_root_dir, dotfiles_home_dir).unwrap(),
             backup_dir,
         )
     }
@@ -217,7 +217,7 @@ mod tests {
         fs::create_dir_all(&dotfiles_home_dir).unwrap();
         fs::create_dir_all(&home_dir).unwrap();
 
-        Config::from_parts(dotfiles_dir, home_dir, backup_root_dir, dotfiles_home_dir)
+        Config::from_parts(dotfiles_dir, home_dir, backup_root_dir, dotfiles_home_dir).unwrap()
     }
 
     #[test]
