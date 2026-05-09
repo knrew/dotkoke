@@ -4,6 +4,7 @@
 
 dotkoke は dotfiles を管理する Unix 系 OS 向け CLI ツールである．
 `dotfiles/home/` 以下にある通常ファイルを `$HOME` 側の対応パスへシンボリックリンクする．
+非 Unix 環境はサポート対象外で，ビルド時に明示的な compile error になる．
 
 ## インストール
 
@@ -131,6 +132,7 @@ dotkoke remove --dry-run /path/to/dotfiles/home/.config/git/config
 ### list
 
 現在管理している通常ファイルの一覧を表示する．
+表示されるパスは `dotfiles/home/` 配下の絶対パスである．
 `dotfiles/home/` 以下のシンボリックリンクは管理ファイル一覧に含めない．
 走査不能なディレクトリがある場合はエラーにする．個別 entry の読み取り失敗など継続可能な問題は警告を出して一覧表示を続行する．
 

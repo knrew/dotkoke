@@ -1,3 +1,6 @@
+#[cfg(not(unix))]
+compile_error!("dotkoke supports Unix-like OSes only.");
+
 mod action;
 mod add;
 mod config;
