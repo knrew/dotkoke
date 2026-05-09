@@ -12,6 +12,7 @@ pub struct CollectedFiles {
     pub files: Vec<PathBuf>,
     pub links: Vec<PathBuf>,
     pub warnings: Vec<String>,
+    pub collection_errors: Vec<String>,
 }
 
 /// 指定したパス以下を再帰的に探索し，通常ファイルとシンボリックリンク(壊れたリンクを含む)を収集する．
@@ -25,7 +26,8 @@ pub struct CollectedFiles {
 /// `CollectedFiles`:
 /// - `files`: 通常ファイルのパス一覧
 /// - `links`: シンボリックリンクのパス一覧
-/// - `warnings`: 個別 entry の読み取り失敗など，走査を継続できる警告の一覧
+/// - `warnings`: 無視可能な entry の警告一覧
+/// - `collection_errors`: 不完全な収集につながる警告一覧
 ///
 /// # NOTE
 /// - 引数で指定したパスが `files` または `links` に入る可能性がある．
@@ -36,6 +38,7 @@ pub fn collect_files_and_links(path: impl AsRef<Path>) -> Result<CollectedFiles>
     let mut files = vec![];
     let mut links = vec![];
     let mut warnings = vec![];
+    let mut collection_errors = vec![];
 
     let mut stack = vec![path.as_ref().to_path_buf()];
 
@@ -53,7 +56,7 @@ pub fn collect_files_and_links(path: impl AsRef<Path>) -> Result<CollectedFiles>
                     for entry in entries {
                         match entry {
                             Ok(e) => stack.push(e.path()),
-                            Err(e) => warnings.push(format!(
+                            Err(e) => collection_errors.push(format!(
                                 "failed to read entry in {}: {}",
                                 path.display(),
                                 e
@@ -70,10 +73,10 @@ pub fn collect_files_and_links(path: impl AsRef<Path>) -> Result<CollectedFiles>
                 warnings.push(format!("unknown file type: {}", path.display()));
             }
             FileKind::Error => {
-                warnings.push(format!("cannot determine file kind of {}", path.display()));
+                collection_errors.push(format!("cannot determine file kind of {}", path.display()));
             }
             FileKind::NotFound => {
-                warnings.push(format!("not found: {}", path.display()));
+                collection_errors.push(format!("not found: {}", path.display()));
             }
         }
     }
@@ -84,21 +87,29 @@ pub fn collect_files_and_links(path: impl AsRef<Path>) -> Result<CollectedFiles>
     links.dedup();
     warnings.sort_unstable();
     warnings.dedup();
+    collection_errors.sort_unstable();
+    collection_errors.dedup();
 
     Ok(CollectedFiles {
         files,
         links,
         warnings,
+        collection_errors,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, os::unix::fs::symlink};
+    use std::{fs, os::unix::fs::symlink, path::Path, process::Command};
 
     use tempfile::TempDir;
 
     use super::*;
+
+    fn make_fifo(path: &Path) {
+        let status = Command::new("mkfifo").arg(path).status().unwrap();
+        assert!(status.success());
+    }
 
     #[test]
     fn collects_regular_files_and_symlinks_without_following_symlinks() {
@@ -119,6 +130,7 @@ mod tests {
         assert_eq!(collected.files, vec![nested_file, file]);
         assert_eq!(collected.links, vec![symlink_path]);
         assert!(collected.warnings.is_empty());
+        assert!(collected.collection_errors.is_empty());
     }
 
     #[test]
@@ -135,10 +147,31 @@ mod tests {
         assert!(collected.files.is_empty());
         assert_eq!(collected.links, vec![symlink_path]);
         assert!(collected.warnings.is_empty());
+        assert!(collected.collection_errors.is_empty());
     }
 
     #[test]
-    fn collects_not_found_as_warning() {
+    fn collects_unknown_as_warning() {
+        let root = TempDir::new().unwrap();
+        let base = root.path().join("home");
+        let fifo = base.join("app.fifo");
+
+        fs::create_dir_all(&base).unwrap();
+        make_fifo(&fifo);
+
+        let collected = collect_files_and_links(&base).unwrap();
+
+        assert!(collected.files.is_empty());
+        assert!(collected.links.is_empty());
+        assert_eq!(
+            collected.warnings,
+            vec![format!("unknown file type: {}", fifo.display())]
+        );
+        assert!(collected.collection_errors.is_empty());
+    }
+
+    #[test]
+    fn collects_not_found_as_collection_error() {
         let root = TempDir::new().unwrap();
         let missing = root.path().join("missing");
 
@@ -146,8 +179,9 @@ mod tests {
 
         assert!(collected.files.is_empty());
         assert!(collected.links.is_empty());
+        assert!(collected.warnings.is_empty());
         assert_eq!(
-            collected.warnings,
+            collected.collection_errors,
             vec![format!("not found: {}", missing.display())]
         );
     }

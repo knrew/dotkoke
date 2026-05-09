@@ -101,15 +101,7 @@ pub fn is_symlink_pointing_to(link: impl AsRef<Path>, target: impl AsRef<Path>) 
 
     let destination = match destination_abs.canonicalize() {
         Ok(path) => path,
-        Err(e) if is_unresolvable_link_destination(e.kind()) => return Ok(false),
-        Err(e) => {
-            return Err(e).with_context(|| {
-                format!(
-                    "failed to canonicalize symlink destination: {}",
-                    destination_abs.display()
-                )
-            });
-        }
+        Err(_) => return Ok(false),
     };
     let target = match target.canonicalize() {
         Ok(path) => path,

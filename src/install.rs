@@ -56,11 +56,15 @@ pub fn plan_install(context: &CommandContext) -> Result<Vec<Action>> {
     let collected = collect_files_and_links(context.config().dotfiles_home_dir())?;
     let mut actions = Vec::new();
 
-    if !collected.warnings.is_empty() {
+    if !collected.collection_errors.is_empty() {
         return Err(anyhow!(
             "failed to collect all files: {}",
-            collected.warnings.join("; ")
+            collected.collection_errors.join("; ")
         ));
+    }
+
+    for warning in collected.warnings {
+        actions.push(Action::Warn { message: warning });
     }
 
     if !collected.links.is_empty() {
@@ -176,11 +180,16 @@ fn ensure_install_parent_is_safe(config: &Config, path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, os::unix::fs::symlink};
+    use std::{fs, os::unix::fs::symlink, path::Path, process::Command};
 
     use tempfile::TempDir;
 
     use super::*;
+
+    fn make_fifo(path: &Path) {
+        let status = Command::new("mkfifo").arg(path).status().unwrap();
+        assert!(status.success());
+    }
 
     fn context(root: &TempDir) -> CommandContext {
         let dotfiles_dir = root.path().join("dotfiles");
@@ -481,7 +490,56 @@ mod tests {
     }
 
     #[test]
-    fn rejects_collection_warnings() {
+    fn plans_symlink_loop_for_replacement() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let source = context.config().dotfiles_home_dir().join(".zshrc");
+        let target = context.config().home_dir().join(".zshrc");
+
+        fs::write(&source, "managed").unwrap();
+        symlink(&target, &target).unwrap();
+
+        assert_eq!(
+            plan_install(&context).unwrap(),
+            vec![
+                Action::RemoveSymlink {
+                    path: target.clone()
+                },
+                Action::CreateSymlink {
+                    from: source,
+                    to: target,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn warns_unknown_dotfiles_entry_and_continues() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let source = context.config().dotfiles_home_dir().join(".zshrc");
+        let target = context.config().home_dir().join(".zshrc");
+        let fifo = context.config().dotfiles_home_dir().join("app.fifo");
+
+        fs::write(&source, "managed").unwrap();
+        make_fifo(&fifo);
+
+        assert_eq!(
+            plan_install(&context).unwrap(),
+            vec![
+                Action::Warn {
+                    message: format!("unknown file type: {}", fifo.display()),
+                },
+                Action::CreateSymlink {
+                    from: source,
+                    to: target,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_collection_errors() {
         let root = TempDir::new().unwrap();
         let context = context(&root);
 
