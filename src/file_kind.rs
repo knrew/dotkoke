@@ -59,7 +59,7 @@ pub fn broken_link_status(path: impl AsRef<Path>) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.file_type().is_symlink() => match fs::metadata(path) {
             Ok(_) => Ok(false),
-            Err(e) if is_unresolvable_link_destination(e.kind()) => Ok(true),
+            Err(e) if is_unresolvable_link_destination(&e) => Ok(true),
             Err(e) => {
                 Err(e).with_context(|| format!("failed to resolve symlink: {}", path.display()))
             }
@@ -115,8 +115,22 @@ pub fn is_symlink_pointing_to(link: impl AsRef<Path>, target: impl AsRef<Path>) 
     Ok(destination == target)
 }
 
-fn is_unresolvable_link_destination(kind: io::ErrorKind) -> bool {
-    matches!(kind, io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
+fn is_unresolvable_link_destination(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    ) || is_filesystem_loop(error)
+}
+
+#[cfg(target_family = "unix")]
+fn is_filesystem_loop(error: &io::Error) -> bool {
+    // `io::ErrorKind::FilesystemLoop` は unstable のため，Unix の ELOOP を直接見る．
+    matches!(error.raw_os_error(), Some(40 | 62 | 90))
+}
+
+#[cfg(not(target_family = "unix"))]
+fn is_filesystem_loop(_: &io::Error) -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -172,12 +186,12 @@ mod tests {
     }
 
     #[test]
-    fn broken_link_status_returns_error_for_symlink_loop() {
+    fn broken_link_status_is_true_for_symlink_loop() {
         let root = TempDir::new().unwrap();
         let link = root.path().join("link");
 
         symlink(&link, &link).unwrap();
 
-        assert!(broken_link_status(&link).is_err());
+        assert!(broken_link_status(&link).unwrap());
     }
 }
