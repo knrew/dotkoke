@@ -108,6 +108,50 @@ impl Config {
         Ok(config)
     }
 
+    pub fn fallback(home_dir: impl AsRef<Path>) -> Result<Self> {
+        let home_dir = home_dir.as_ref();
+        let home_dir = home_dir
+            .canonicalize()
+            .with_context(|| format!("invalid fallback home directory: {}", home_dir.display()))?;
+
+        if !home_dir.is_dir() {
+            return Err(anyhow!("{} is not directory.", home_dir.display()));
+        }
+
+        let dotfiles_dir = home_dir.join(".dotfiles");
+        let dotfiles_dir = dotfiles_dir.canonicalize().with_context(|| {
+            format!(
+                "invalid fallback dotfiles directory: {}",
+                dotfiles_dir.display()
+            )
+        })?;
+
+        if !dotfiles_dir.is_dir() {
+            return Err(anyhow!("{} is not directory.", dotfiles_dir.display()));
+        }
+
+        let dotfiles_home_dir = dotfiles_dir
+            .join("home")
+            .canonicalize()
+            .with_context(|| format!("invalid path: {}/home", dotfiles_dir.display()))?;
+
+        if !dotfiles_home_dir.is_dir() {
+            return Err(anyhow!("{} is not directory.", dotfiles_home_dir.display()));
+        }
+
+        let backup_root_dir = home_dir.join(".backup_dotfiles");
+        if backup_root_dir.exists() && !backup_root_dir.is_dir() {
+            return Err(anyhow!("{} is not directory.", backup_root_dir.display()));
+        }
+
+        Ok(Config {
+            dotfiles_dir,
+            home_dir,
+            backup_root_dir,
+            dotfiles_home_dir,
+        })
+    }
+
     pub fn from_parts(
         dotfiles_dir: PathBuf,
         home_dir: PathBuf,
@@ -204,5 +248,53 @@ mod tests {
         .unwrap();
 
         assert!(Config::read(config_path).is_err());
+    }
+
+    #[test]
+    fn builds_fallback_config_from_home() {
+        let root = TempDir::new().unwrap();
+        let home_dir = root.path().join("home");
+        let dotfiles_dir = home_dir.join(".dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+
+        let config = Config::fallback(&home_dir).unwrap();
+
+        assert_eq!(config.home_dir(), home_dir.canonicalize().unwrap());
+        assert_eq!(config.dotfiles_dir(), dotfiles_dir.canonicalize().unwrap());
+        assert_eq!(
+            config.dotfiles_home_dir(),
+            dotfiles_home_dir.canonicalize().unwrap()
+        );
+        assert_eq!(
+            config.backup_root_dir(),
+            home_dir.canonicalize().unwrap().join(".backup_dotfiles")
+        );
+    }
+
+    #[test]
+    fn fallback_requires_dotfiles_home_dir() {
+        let root = TempDir::new().unwrap();
+        let home_dir = root.path().join("home");
+
+        fs::create_dir_all(&home_dir).unwrap();
+
+        assert!(Config::fallback(&home_dir).is_err());
+    }
+
+    #[test]
+    fn fallback_allows_missing_backup_dir() {
+        let root = TempDir::new().unwrap();
+        let home_dir = root.path().join("home");
+        let dotfiles_home_dir = home_dir.join(".dotfiles/home");
+        let backup_dir = home_dir.join(".backup_dotfiles");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+
+        let config = Config::fallback(&home_dir).unwrap();
+
+        assert!(!backup_dir.exists());
+        assert_eq!(config.backup_root_dir(), backup_dir);
     }
 }

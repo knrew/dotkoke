@@ -58,6 +58,12 @@ enum Command {
     Status {},
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ConfigSource {
+    File(PathBuf),
+    Fallback { home: PathBuf },
+}
+
 /// configを探す．
 ///
 /// 以下の優先順位でconfigを探す．
@@ -65,8 +71,10 @@ enum Command {
 /// 2. 環境変数`DOTKOKE_CONFIG`で指定されたファイル
 /// 3. `$XDG_CONFIG_HOME/dotkoke/config.toml`
 /// 4. `$HOME/.config/dotkoke/config.toml`
-fn find_config_file_path(cli: &Cli) -> Result<PathBuf> {
-    resolve_config_file_path(
+///
+/// configが見つからない場合は，`$HOME`からfallback configを組み立てる．
+fn find_config_source(cli: &Cli) -> Result<ConfigSource> {
+    resolve_config_source(
         cli.config_file.clone(),
         env::var_os("DOTKOKE_CONFIG").map(PathBuf::from),
         env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
@@ -74,12 +82,12 @@ fn find_config_file_path(cli: &Cli) -> Result<PathBuf> {
     )
 }
 
-fn resolve_config_file_path(
+fn resolve_config_source(
     cli_config: Option<PathBuf>,
     env_config: Option<PathBuf>,
     xdg_config_home: Option<PathBuf>,
     home: Option<PathBuf>,
-) -> Result<PathBuf> {
+) -> Result<ConfigSource> {
     fn ensure_config_file(path: &Path) -> Result<()> {
         if !path.exists() {
             return Err(anyhow!("{} does not exist.", path.display()));
@@ -106,37 +114,39 @@ fn resolve_config_file_path(
 
     if let Some(config) = cli_config {
         ensure_config_file(&config)?;
-        return Ok(config);
+        return Ok(ConfigSource::File(config));
     }
 
     if let Some(config) = env_config {
         ensure_config_file(&config)?;
-        return Ok(config);
+        return Ok(ConfigSource::File(config));
     }
 
     if let Some(xdg_config_home) = xdg_config_home {
         let config = xdg_config_home.join("dotkoke/config.toml");
         if let Some(path) = resolve_optional_config(config)? {
-            return Ok(path);
+            return Ok(ConfigSource::File(path));
         }
     }
 
-    if let Some(home) = home {
+    if let Some(home) = &home {
         let config = home.join(".config/dotkoke/config.toml");
         if let Some(path) = resolve_optional_config(config)? {
-            return Ok(path);
+            return Ok(ConfigSource::File(path));
         }
     }
 
-    Err(anyhow!("config file not found."))
+    home.map(|home| ConfigSource::Fallback { home })
+        .ok_or_else(|| anyhow!("HOME is not set."))
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let config_file_path = find_config_file_path(&cli)?;
-
-    let config = Config::read(config_file_path)?;
+    let config = match find_config_source(&cli)? {
+        ConfigSource::File(path) => Config::read(path)?,
+        ConfigSource::Fallback { home } => Config::fallback(home)?,
+    };
 
     match cli.command {
         Command::Init {} => {
@@ -209,7 +219,7 @@ mod tests {
         touch(&xdg_config);
         touch(&home_config);
 
-        let path = resolve_config_file_path(
+        let source = resolve_config_source(
             Some(cli_config.clone()),
             Some(env_config),
             Some(root.path().join("xdg")),
@@ -217,7 +227,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(path, cli_config);
+        assert_eq!(source, ConfigSource::File(cli_config));
     }
 
     #[test]
@@ -231,7 +241,7 @@ mod tests {
         touch(&xdg_config);
         touch(&home_config);
 
-        let path = resolve_config_file_path(
+        let source = resolve_config_source(
             None,
             Some(env_config.clone()),
             Some(root.path().join("xdg")),
@@ -239,7 +249,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(path, env_config);
+        assert_eq!(source, ConfigSource::File(env_config));
     }
 
     #[test]
@@ -253,9 +263,9 @@ mod tests {
         touch(&xdg_config);
         touch(&home_config);
 
-        let path = resolve_config_file_path(None, None, Some(xdg_config_home), Some(home)).unwrap();
+        let source = resolve_config_source(None, None, Some(xdg_config_home), Some(home)).unwrap();
 
-        assert_eq!(path, xdg_config);
+        assert_eq!(source, ConfigSource::File(xdg_config));
     }
 
     #[test]
@@ -266,9 +276,9 @@ mod tests {
 
         touch(&home_config);
 
-        let path = resolve_config_file_path(None, None, None, Some(home)).unwrap();
+        let source = resolve_config_source(None, None, None, Some(home)).unwrap();
 
-        assert_eq!(path, home_config);
+        assert_eq!(source, ConfigSource::File(home_config));
     }
 
     #[test]
@@ -277,7 +287,7 @@ mod tests {
         let xdg_config = root.path().join("xdg/dotkoke/config.toml");
         fs::create_dir_all(&xdg_config).unwrap();
 
-        let err = resolve_config_file_path(None, None, Some(root.path().join("xdg")), None)
+        let err = resolve_config_source(None, None, Some(root.path().join("xdg")), None)
             .unwrap_err()
             .to_string();
 
@@ -285,18 +295,63 @@ mod tests {
     }
 
     #[test]
-    fn missing_config_returns_not_found_error() {
+    fn missing_config_uses_fallback() {
         let root = TempDir::new().unwrap();
+        let home = root.path().join("home");
 
-        let err = resolve_config_file_path(
+        let source = resolve_config_source(
             None,
             None,
             Some(root.path().join("xdg")),
+            Some(home.clone()),
+        )
+        .unwrap();
+
+        assert_eq!(source, ConfigSource::Fallback { home });
+    }
+
+    #[test]
+    fn missing_config_without_home_returns_error() {
+        let root = TempDir::new().unwrap();
+
+        let err = resolve_config_source(None, None, Some(root.path().join("xdg")), None)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "HOME is not set.");
+    }
+
+    #[test]
+    fn missing_cli_config_does_not_use_fallback() {
+        let root = TempDir::new().unwrap();
+        let cli_config = root.path().join("missing.toml");
+
+        let err = resolve_config_source(
+            Some(cli_config.clone()),
+            None,
+            None,
             Some(root.path().join("home")),
         )
         .unwrap_err()
         .to_string();
 
-        assert_eq!(err, "config file not found.");
+        assert_eq!(err, format!("{} does not exist.", cli_config.display()));
+    }
+
+    #[test]
+    fn missing_env_config_does_not_use_fallback() {
+        let root = TempDir::new().unwrap();
+        let env_config = root.path().join("missing.toml");
+
+        let err = resolve_config_source(
+            None,
+            Some(env_config.clone()),
+            None,
+            Some(root.path().join("home")),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(err, format!("{} does not exist.", env_config.display()));
     }
 }

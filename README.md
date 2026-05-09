@@ -20,6 +20,16 @@ cargo install --git https://github.com/knrew/dotkoke
 3. `$XDG_CONFIG_HOME/dotkoke/config.toml`
 4. `$HOME/.config/dotkoke/config.toml`
 
+設定ファイルが未指定で，上記の自動探索先にも存在しない場合は，以下の fallback 設定を使う．
+
+| キー | fallback 値 |
+| ---- | ---- |
+| `dotfiles` | `$HOME/.dotfiles` |
+| `home` | `$HOME` |
+| `backup_dir` | `$HOME/.backup_dotfiles` |
+
+`--config` または `DOTKOKE_CONFIG` で明示した設定ファイルが存在しない場合は fallback せずエラーにする．
+
 設定ファイルは以下の構造である．
 
 ```toml
@@ -35,8 +45,8 @@ backup_dir = "/path/to/backup_dir"
 | `home` | 実際にリンクを貼りたい `$HOME` ルート |
 | `backup_dir` | リンク作成時に上書き対象ファイルやディレクトリを退避するルート．`YYYYmmdd_HHMM` サブディレクトリが自動生成される |
 
-`dotfiles`，`home`，`backup_dir` は読み込み時に canonicalize されるため，指定先は事前に存在している必要がある．
-また，`dotfiles/home/` も存在している必要がある．
+設定ファイルを読み込む場合，`dotfiles`，`home`，`backup_dir` は読み込み時に canonicalize されるため，指定先は事前に存在している必要がある．
+fallback を使う場合，`$HOME/.dotfiles/home` は事前に存在している必要がある．`$HOME/.backup_dotfiles` は存在しなくてもよい．
 
 ### ディレクトリ構成例
 
