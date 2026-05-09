@@ -143,6 +143,27 @@ mod tests {
     }
 
     #[test]
+    fn removes_home_symlink_with_unresolvable_destination() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let managed = context.config().dotfiles_home_dir().join(".zshrc");
+        let home = context.config().home_dir().join(".zshrc");
+        let blocking_file = root.path().join("blocking-file");
+
+        fs::write(&managed, "managed").unwrap();
+        fs::write(&blocking_file, "blocking").unwrap();
+        symlink(blocking_file.join("child"), &home).unwrap();
+
+        assert_eq!(
+            plan_remove(&context, &managed).unwrap(),
+            vec![
+                Action::RemoveSymlink { path: home },
+                Action::RemoveManagedFile { path: managed },
+            ]
+        );
+    }
+
+    #[test]
     fn rejects_not_found_path() {
         let root = TempDir::new().unwrap();
         let context = context(&root);

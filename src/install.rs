@@ -455,6 +455,32 @@ mod tests {
     }
 
     #[test]
+    fn plans_unresolvable_home_symlink_destination_for_replacement() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let source = context.config().dotfiles_home_dir().join(".zshrc");
+        let target = context.config().home_dir().join(".zshrc");
+        let blocking_file = root.path().join("blocking-file");
+
+        fs::write(&source, "managed").unwrap();
+        fs::write(&blocking_file, "blocking").unwrap();
+        symlink(blocking_file.join("child"), &target).unwrap();
+
+        assert_eq!(
+            plan_install(&context).unwrap(),
+            vec![
+                Action::RemoveSymlink {
+                    path: target.clone()
+                },
+                Action::CreateSymlink {
+                    from: source,
+                    to: target,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn rejects_collection_warnings() {
         let root = TempDir::new().unwrap();
         let context = context(&root);

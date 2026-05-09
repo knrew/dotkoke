@@ -52,14 +52,14 @@ pub fn exists(path: impl AsRef<Path>) -> bool {
 
 /// `path` が壊れたシンボリックリンクなら true を返す．
 ///
-/// リンク先の `NotFound` だけを broken と扱い，権限エラーなどの判定不能状態は
+/// リンク先が解決不能な場合を broken と扱い，権限エラーなどの判定不能状態は
 /// 呼び出し側へエラーとして返す．
 pub fn broken_link_status(path: impl AsRef<Path>) -> Result<bool> {
     let path = path.as_ref();
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.file_type().is_symlink() => match fs::metadata(path) {
             Ok(_) => Ok(false),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(true),
+            Err(e) if is_unresolvable_link_destination(e.kind()) => Ok(true),
             Err(e) => {
                 Err(e).with_context(|| format!("failed to resolve symlink: {}", path.display()))
             }
@@ -101,7 +101,7 @@ pub fn is_symlink_pointing_to(link: impl AsRef<Path>, target: impl AsRef<Path>) 
 
     let destination = match destination_abs.canonicalize() {
         Ok(path) => path,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) if is_unresolvable_link_destination(e.kind()) => return Ok(false),
         Err(e) => {
             return Err(e).with_context(|| {
                 format!(
@@ -121,4 +121,8 @@ pub fn is_symlink_pointing_to(link: impl AsRef<Path>, target: impl AsRef<Path>) 
     };
 
     Ok(destination == target)
+}
+
+fn is_unresolvable_link_destination(kind: io::ErrorKind) -> bool {
+    matches!(kind, io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
 }
