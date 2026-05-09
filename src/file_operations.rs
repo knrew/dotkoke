@@ -43,12 +43,19 @@ pub fn remove_symlink(path: impl AsRef<Path>) -> Result<()> {
 }
 
 /// `from`を`to`にrename(mv)する．
-/// `to`に既存ファイルがあるかどうかは確認しない．
-pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
+/// `to`が既に存在する場合はエラーにする．
+pub fn rename_without_overwrite(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
     let from = from.as_ref();
     let to = to.as_ref();
 
     create_parent_dir(to)?;
+
+    if exists(to) {
+        return Err(anyhow!(
+            "backup destination already exists: {}",
+            to.display()
+        ));
+    }
 
     fs::rename(from, to)
         .with_context(|| format!("failed to rename: {} -> {}", from.display(), to.display()))?;

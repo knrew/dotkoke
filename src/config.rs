@@ -1,7 +1,7 @@
 //! 設定ファイル(toml)から設定を読み込む．
 
 use std::{
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -63,16 +63,8 @@ impl Config {
             )
         })?;
 
-        let dotfiles_dir = dotfiles_dir.canonicalize().with_context(|| {
-            format!(
-                "invalid dotfiles directory in config: {}",
-                dotfiles_dir.display()
-            )
-        })?;
-
-        if !dotfiles_dir.is_dir() {
-            return Err(anyhow!("{} is not directory.", dotfiles_dir.display()));
-        }
+        let dotfiles_dir =
+            canonicalize_existing_dir(dotfiles_dir, "invalid dotfiles directory in config")?;
 
         let home_dir = home_dir
             .canonicalize()
@@ -82,12 +74,8 @@ impl Config {
             return Err(anyhow!("{} is not directory.", home_dir.display()));
         }
 
-        let backup_root_dir = backup_dir.canonicalize().with_context(|| {
-            format!(
-                "invalid backup directory in config: {}",
-                backup_dir.display()
-            )
-        })?;
+        let backup_root_dir =
+            resolve_optional_dir(backup_dir, "invalid backup directory in config")?;
 
         let dotfiles_home_dir = dotfiles_dir
             .join("home")
@@ -97,6 +85,8 @@ impl Config {
         if !dotfiles_home_dir.is_dir() {
             return Err(anyhow!("{} is not directory.", dotfiles_home_dir.display()));
         }
+
+        validate_home_and_dotfiles_home(&home_dir, &dotfiles_home_dir)?;
 
         let config = Config {
             dotfiles_dir,
@@ -118,17 +108,10 @@ impl Config {
             return Err(anyhow!("{} is not directory.", home_dir.display()));
         }
 
-        let dotfiles_dir = home_dir.join(".dotfiles");
-        let dotfiles_dir = dotfiles_dir.canonicalize().with_context(|| {
-            format!(
-                "invalid fallback dotfiles directory: {}",
-                dotfiles_dir.display()
-            )
-        })?;
-
-        if !dotfiles_dir.is_dir() {
-            return Err(anyhow!("{} is not directory.", dotfiles_dir.display()));
-        }
+        let dotfiles_dir = canonicalize_existing_dir(
+            home_dir.join(".dotfiles"),
+            "invalid fallback dotfiles directory",
+        )?;
 
         let dotfiles_home_dir = dotfiles_dir
             .join("home")
@@ -138,6 +121,8 @@ impl Config {
         if !dotfiles_home_dir.is_dir() {
             return Err(anyhow!("{} is not directory.", dotfiles_home_dir.display()));
         }
+
+        validate_home_and_dotfiles_home(&home_dir, &dotfiles_home_dir)?;
 
         let backup_root_dir = home_dir.join(".backup_dotfiles");
         if backup_root_dir.exists() && !backup_root_dir.is_dir() {
@@ -187,6 +172,37 @@ impl Config {
     }
 }
 
+fn canonicalize_existing_dir(path: PathBuf, context: &str) -> Result<PathBuf> {
+    let path = path
+        .canonicalize()
+        .with_context(|| format!("{context}: {}", path.display()))?;
+
+    if !path.is_dir() {
+        return Err(anyhow!("{} is not directory.", path.display()));
+    }
+
+    Ok(path)
+}
+
+fn resolve_optional_dir(path: PathBuf, context: &str) -> Result<PathBuf> {
+    match fs::symlink_metadata(&path) {
+        Ok(_) => canonicalize_existing_dir(path, context),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(path),
+        Err(e) => Err(e).with_context(|| format!("{context}: {}", path.display())),
+    }
+}
+
+fn validate_home_and_dotfiles_home(home_dir: &Path, dotfiles_home_dir: &Path) -> Result<()> {
+    if home_dir == dotfiles_home_dir {
+        return Err(anyhow!(
+            "home directory must not be the same as dotfiles home directory: {}",
+            home_dir.display()
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -225,6 +241,58 @@ mod tests {
             config.dotfiles_home_dir(),
             dotfiles_home_dir.canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn reads_config_with_missing_backup_dir() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let home_dir = root.path().join("home");
+        let backup_dir = root.path().join("backup");
+        let config_path = root.path().join("dotkoke.toml");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                "[general]\ndotfiles = {:?}\nhome = {:?}\nbackup_dir = {:?}\n",
+                dotfiles_dir, home_dir, backup_dir
+            ),
+        )
+        .unwrap();
+
+        let config = Config::read(config_path).unwrap();
+
+        assert!(!backup_dir.exists());
+        assert_eq!(config.backup_root_dir(), backup_dir);
+    }
+
+    #[test]
+    fn rejects_file_backup_dir() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let home_dir = root.path().join("home");
+        let backup_dir = root.path().join("backup");
+        let config_path = root.path().join("dotkoke.toml");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::write(&backup_dir, "backup").unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                "[general]\ndotfiles = {:?}\nhome = {:?}\nbackup_dir = {:?}\n",
+                dotfiles_dir, home_dir, backup_dir
+            ),
+        )
+        .unwrap();
+
+        let err = Config::read(config_path).unwrap_err().to_string();
+
+        assert!(err.contains("is not directory."));
     }
 
     #[test]
@@ -296,5 +364,44 @@ mod tests {
 
         assert!(!backup_dir.exists());
         assert_eq!(config.backup_root_dir(), backup_dir);
+    }
+
+    #[test]
+    fn fallback_rejects_file_backup_dir() {
+        let root = TempDir::new().unwrap();
+        let home_dir = root.path().join("home");
+        let dotfiles_home_dir = home_dir.join(".dotfiles/home");
+        let backup_dir = home_dir.join(".backup_dotfiles");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::write(&backup_dir, "backup").unwrap();
+
+        let err = Config::fallback(&home_dir).unwrap_err().to_string();
+
+        assert!(err.contains("is not directory."));
+    }
+
+    #[test]
+    fn rejects_home_equal_to_dotfiles_home() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let backup_dir = root.path().join("backup");
+        let config_path = root.path().join("dotkoke.toml");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&backup_dir).unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                "[general]\ndotfiles = {:?}\nhome = {:?}\nbackup_dir = {:?}\n",
+                dotfiles_dir, dotfiles_home_dir, backup_dir
+            ),
+        )
+        .unwrap();
+
+        let err = Config::read(config_path).unwrap_err().to_string();
+
+        assert!(err.contains("must not be the same"));
     }
 }
