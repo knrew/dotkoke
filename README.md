@@ -45,6 +45,7 @@ backup_dir = "/path/to/backup_dir"
 | `home` | 実際にリンクを貼りたい `$HOME` ルート |
 | `backup_dir` | リンク作成時に上書き対象ファイルやディレクトリを退避するルート．`YYYYmmdd_HHMMSS` サブディレクトリが自動生成され，衝突時は suffix が付く |
 
+設定ファイル内の `dotfiles`，`home`，`backup_dir` は絶対パスで指定する必要がある．相対パスは current working directory に依存する事故を避けるためエラーにする．
 設定ファイルを読み込む場合，`dotfiles`，`home`，`dotfiles/home` は読み込み時に canonicalize されるため，指定先は事前に存在している必要がある．
 `backup_dir` は存在しなくてもよい．存在する場合はディレクトリである必要があり，通常ファイルなどの場合はエラーにする．
 fallback を使う場合，`$HOME/.dotfiles/home` は事前に存在している必要がある．`$HOME/.backup_dotfiles` は存在しなくてもよい．

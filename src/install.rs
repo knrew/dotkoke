@@ -203,7 +203,7 @@ mod tests {
         fs::create_dir_all(&backup_root_dir).unwrap();
 
         CommandContext::with_backup_dir(
-            Config::from_parts(dotfiles_dir, home_dir, backup_root_dir, dotfiles_home_dir),
+            Config::from_parts(dotfiles_dir, home_dir, backup_root_dir, dotfiles_home_dir).unwrap(),
             backup_dir,
         )
     }
@@ -217,7 +217,7 @@ mod tests {
         fs::create_dir_all(&dotfiles_home_dir).unwrap();
         fs::create_dir_all(&home_dir).unwrap();
 
-        Config::from_parts(dotfiles_dir, home_dir, backup_root_dir, dotfiles_home_dir)
+        Config::from_parts(dotfiles_dir, home_dir, backup_root_dir, dotfiles_home_dir).unwrap()
     }
 
     #[test]
@@ -337,11 +337,11 @@ mod tests {
         fs::remove_file(&target).unwrap();
         fs::write(&target, "local2").unwrap();
 
-        let err = install(&context, ExecutionMode::Real)
-            .unwrap_err()
-            .to_string();
+        let err = install(&context, ExecutionMode::Real).unwrap_err();
+        let message = format!("{err:#}");
 
-        assert!(err.contains("backup destination already exists"));
+        assert!(message.contains("failed to execute action: backup path"));
+        assert!(message.contains("backup destination already exists"));
         assert_eq!(fs::read_to_string(backup).unwrap(), "local1");
     }
 

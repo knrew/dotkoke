@@ -63,6 +63,10 @@ impl Config {
             )
         })?;
 
+        ensure_absolute_path(&dotfiles_dir, "dotfiles")?;
+        ensure_absolute_path(&home_dir, "home")?;
+        ensure_absolute_path(&backup_dir, "backup_dir")?;
+
         let dotfiles_dir =
             canonicalize_existing_dir(dotfiles_dir, "invalid dotfiles directory in config")?;
 
@@ -137,18 +141,40 @@ impl Config {
         })
     }
 
-    pub fn from_parts(
+    #[cfg(test)]
+    pub(crate) fn from_parts(
         dotfiles_dir: PathBuf,
         home_dir: PathBuf,
         backup_root_dir: PathBuf,
         dotfiles_home_dir: PathBuf,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let dotfiles_dir = canonicalize_existing_dir(dotfiles_dir, "invalid dotfiles directory")?;
+        let home_dir = canonicalize_existing_dir(home_dir, "invalid home directory")?;
+        let backup_root_dir = resolve_optional_dir(backup_root_dir, "invalid backup directory")?;
+        let dotfiles_home_dir =
+            canonicalize_existing_dir(dotfiles_home_dir, "invalid dotfiles home directory")?;
+
+        let expected_dotfiles_home_dir = dotfiles_dir
+            .join("home")
+            .canonicalize()
+            .with_context(|| format!("invalid path: {}/home", dotfiles_dir.display()))?;
+
+        if dotfiles_home_dir != expected_dotfiles_home_dir {
+            return Err(anyhow!(
+                "dotfiles home directory must be {}/home: {}",
+                dotfiles_dir.display(),
+                dotfiles_home_dir.display()
+            ));
+        }
+
+        validate_home_and_dotfiles_home(&home_dir, &dotfiles_home_dir)?;
+
+        Ok(Self {
             dotfiles_dir,
             home_dir,
             backup_root_dir,
             dotfiles_home_dir,
-        }
+        })
     }
 
     pub fn dotfiles_dir(&self) -> &Path {
@@ -170,6 +196,17 @@ impl Config {
     pub fn backup_dir_for_timestamp(&self, timestamp: &str) -> PathBuf {
         self.backup_root_dir.join(timestamp)
     }
+}
+
+fn ensure_absolute_path(path: &Path, name: &str) -> Result<()> {
+    if !path.is_absolute() {
+        return Err(anyhow!(
+            "{name} path in config must be absolute: {}",
+            path.display()
+        ));
+    }
+
+    Ok(())
 }
 
 fn canonicalize_existing_dir(path: PathBuf, context: &str) -> Result<PathBuf> {
@@ -296,6 +333,77 @@ mod tests {
     }
 
     #[test]
+    fn rejects_relative_dotfiles_path_in_config() {
+        let root = TempDir::new().unwrap();
+        let home_dir = root.path().join("home");
+        let backup_dir = root.path().join("backup");
+        let config_path = root.path().join("dotkoke.toml");
+
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::create_dir_all(&backup_dir).unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                "[general]\ndotfiles = \"dotfiles\"\nhome = {:?}\nbackup_dir = {:?}\n",
+                home_dir, backup_dir
+            ),
+        )
+        .unwrap();
+
+        let err = Config::read(config_path).unwrap_err().to_string();
+
+        assert!(err.contains("dotfiles path in config must be absolute"));
+    }
+
+    #[test]
+    fn rejects_relative_home_path_in_config() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let backup_dir = root.path().join("backup");
+        let config_path = root.path().join("dotkoke.toml");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&backup_dir).unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                "[general]\ndotfiles = {:?}\nhome = \"home\"\nbackup_dir = {:?}\n",
+                dotfiles_dir, backup_dir
+            ),
+        )
+        .unwrap();
+
+        let err = Config::read(config_path).unwrap_err().to_string();
+
+        assert!(err.contains("home path in config must be absolute"));
+    }
+
+    #[test]
+    fn rejects_relative_backup_path_in_config() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let home_dir = root.path().join("home");
+        let config_path = root.path().join("dotkoke.toml");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                "[general]\ndotfiles = {:?}\nhome = {:?}\nbackup_dir = \"backup\"\n",
+                dotfiles_dir, home_dir
+            ),
+        )
+        .unwrap();
+
+        let err = Config::read(config_path).unwrap_err().to_string();
+
+        assert!(err.contains("backup_dir path in config must be absolute"));
+    }
+
+    #[test]
     fn rejects_missing_dotfiles_home_dir() {
         let root = TempDir::new().unwrap();
         let dotfiles_dir = root.path().join("dotfiles");
@@ -403,5 +511,67 @@ mod tests {
         let err = Config::read(config_path).unwrap_err().to_string();
 
         assert!(err.contains("must not be the same"));
+    }
+
+    #[test]
+    fn from_parts_rejects_home_equal_to_dotfiles_home() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let backup_dir = root.path().join("backup");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&backup_dir).unwrap();
+
+        let err = Config::from_parts(
+            dotfiles_dir,
+            dotfiles_home_dir.clone(),
+            backup_dir,
+            dotfiles_home_dir,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("must not be the same"));
+    }
+
+    #[test]
+    fn from_parts_rejects_file_backup_dir() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let home_dir = root.path().join("home");
+        let backup_dir = root.path().join("backup");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::write(&backup_dir, "backup").unwrap();
+
+        let err = Config::from_parts(dotfiles_dir, home_dir, backup_dir, dotfiles_home_dir)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("is not directory."));
+    }
+
+    #[test]
+    fn from_parts_rejects_dotfiles_home_mismatch() {
+        let root = TempDir::new().unwrap();
+        let dotfiles_dir = root.path().join("dotfiles");
+        let dotfiles_home_dir = dotfiles_dir.join("home");
+        let other_dotfiles_home_dir = dotfiles_dir.join("other-home");
+        let home_dir = root.path().join("home");
+        let backup_dir = root.path().join("backup");
+
+        fs::create_dir_all(&dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&other_dotfiles_home_dir).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::create_dir_all(&backup_dir).unwrap();
+
+        let err = Config::from_parts(dotfiles_dir, home_dir, backup_dir, other_dotfiles_home_dir)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("dotfiles home directory must be"));
     }
 }
