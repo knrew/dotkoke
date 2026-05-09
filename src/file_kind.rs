@@ -118,3 +118,66 @@ pub fn is_symlink_pointing_to(link: impl AsRef<Path>, target: impl AsRef<Path>) 
 fn is_unresolvable_link_destination(kind: io::ErrorKind) -> bool {
     matches!(kind, io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, os::unix::fs::symlink};
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn broken_link_status_is_false_for_regular_file() {
+        let root = TempDir::new().unwrap();
+        let file = root.path().join("file");
+
+        fs::write(&file, "content").unwrap();
+
+        assert!(!broken_link_status(&file).unwrap());
+    }
+
+    #[test]
+    fn broken_link_status_is_false_for_valid_symlink() {
+        let root = TempDir::new().unwrap();
+        let target = root.path().join("target");
+        let link = root.path().join("link");
+
+        fs::write(&target, "content").unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert!(!broken_link_status(&link).unwrap());
+    }
+
+    #[test]
+    fn broken_link_status_is_true_for_missing_destination() {
+        let root = TempDir::new().unwrap();
+        let link = root.path().join("link");
+
+        symlink(root.path().join("missing"), &link).unwrap();
+
+        assert!(broken_link_status(&link).unwrap());
+    }
+
+    #[test]
+    fn broken_link_status_is_true_for_not_a_directory_destination() {
+        let root = TempDir::new().unwrap();
+        let blocking_file = root.path().join("blocking-file");
+        let link = root.path().join("link");
+
+        fs::write(&blocking_file, "content").unwrap();
+        symlink(blocking_file.join("child"), &link).unwrap();
+
+        assert!(broken_link_status(&link).unwrap());
+    }
+
+    #[test]
+    fn broken_link_status_returns_error_for_symlink_loop() {
+        let root = TempDir::new().unwrap();
+        let link = root.path().join("link");
+
+        symlink(&link, &link).unwrap();
+
+        assert!(broken_link_status(&link).is_err());
+    }
+}

@@ -143,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    fn removes_home_symlink_with_unresolvable_destination() {
+    fn removes_home_symlink_with_not_a_directory_destination() {
         let root = TempDir::new().unwrap();
         let context = context(&root);
         let managed = context.config().dotfiles_home_dir().join(".zshrc");
