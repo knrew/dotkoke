@@ -53,10 +53,21 @@ pub fn install_with_output(
 
 pub fn plan_install(context: &CommandContext) -> Result<Vec<Action>> {
     let resolver = PathResolver::new(context.config());
-    let (files, links) = collect_files_and_links(context.config().dotfiles_home_dir())?;
+    let collected = collect_files_and_links(context.config().dotfiles_home_dir())?;
     let mut actions = Vec::new();
 
-    if !links.is_empty() {
+    if !collected.collection_errors.is_empty() {
+        return Err(anyhow!(
+            "failed to collect all files: {}",
+            collected.collection_errors.join("; ")
+        ));
+    }
+
+    for warning in collected.warnings {
+        actions.push(Action::Warn { message: warning });
+    }
+
+    if !collected.links.is_empty() {
         actions.push(Action::Warn {
             message: format!(
                 "symlink(s) exist in {} (they will be ignored).",
@@ -65,11 +76,11 @@ pub fn plan_install(context: &CommandContext) -> Result<Vec<Action>> {
         });
     }
 
-    for from in files {
+    for from in collected.files {
         let to = resolver.install_path(&from)?;
         ensure_install_parent_is_safe(context.config(), &to)?;
 
-        if is_symlink_pointing_to(&to, &from) {
+        if is_symlink_pointing_to(&to, &from)? {
             actions.push(Action::SkipAlreadyLinked { from, to });
             continue;
         }
@@ -169,11 +180,16 @@ fn ensure_install_parent_is_safe(config: &Config, path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, os::unix::fs::symlink};
+    use std::{fs, os::unix::fs::symlink, path::Path, process::Command};
 
     use tempfile::TempDir;
 
     use super::*;
+
+    fn make_fifo(path: &Path) {
+        let status = Command::new("mkfifo").arg(path).status().unwrap();
+        assert!(status.success());
+    }
 
     fn context(root: &TempDir) -> CommandContext {
         let dotfiles_dir = root.path().join("dotfiles");
@@ -400,5 +416,137 @@ mod tests {
                 to: target,
             }]
         );
+    }
+
+    #[test]
+    fn plans_existing_relative_correct_symlink_as_skip() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let source = context.config().dotfiles_home_dir().join(".zshrc");
+        let target = context.config().home_dir().join(".zshrc");
+
+        fs::write(&source, "managed").unwrap();
+        symlink("../dotfiles/home/.zshrc", &target).unwrap();
+
+        assert_eq!(
+            plan_install(&context).unwrap(),
+            vec![Action::SkipAlreadyLinked {
+                from: source,
+                to: target,
+            }]
+        );
+    }
+
+    #[test]
+    fn does_not_skip_symlink_to_hard_link_of_managed_file() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let source = context.config().dotfiles_home_dir().join(".zshrc");
+        let hard_link = root.path().join("same-inode");
+        let target = context.config().home_dir().join(".zshrc");
+
+        fs::write(&source, "managed").unwrap();
+        fs::hard_link(&source, &hard_link).unwrap();
+        symlink(&hard_link, &target).unwrap();
+
+        assert_eq!(
+            plan_install(&context).unwrap(),
+            vec![
+                Action::RemoveSymlink {
+                    path: target.clone()
+                },
+                Action::CreateSymlink {
+                    from: source,
+                    to: target,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn plans_unresolvable_home_symlink_destination_for_replacement() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let source = context.config().dotfiles_home_dir().join(".zshrc");
+        let target = context.config().home_dir().join(".zshrc");
+        let blocking_file = root.path().join("blocking-file");
+
+        fs::write(&source, "managed").unwrap();
+        fs::write(&blocking_file, "blocking").unwrap();
+        symlink(blocking_file.join("child"), &target).unwrap();
+
+        assert_eq!(
+            plan_install(&context).unwrap(),
+            vec![
+                Action::RemoveSymlink {
+                    path: target.clone()
+                },
+                Action::CreateSymlink {
+                    from: source,
+                    to: target,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn plans_symlink_loop_for_replacement() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let source = context.config().dotfiles_home_dir().join(".zshrc");
+        let target = context.config().home_dir().join(".zshrc");
+
+        fs::write(&source, "managed").unwrap();
+        symlink(&target, &target).unwrap();
+
+        assert_eq!(
+            plan_install(&context).unwrap(),
+            vec![
+                Action::RemoveSymlink {
+                    path: target.clone()
+                },
+                Action::CreateSymlink {
+                    from: source,
+                    to: target,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn warns_unknown_dotfiles_entry_and_continues() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let source = context.config().dotfiles_home_dir().join(".zshrc");
+        let target = context.config().home_dir().join(".zshrc");
+        let fifo = context.config().dotfiles_home_dir().join("app.fifo");
+
+        fs::write(&source, "managed").unwrap();
+        make_fifo(&fifo);
+
+        assert_eq!(
+            plan_install(&context).unwrap(),
+            vec![
+                Action::Warn {
+                    message: format!("unknown file type: {}", fifo.display()),
+                },
+                Action::CreateSymlink {
+                    from: source,
+                    to: target,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_collection_errors() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+
+        fs::remove_dir(context.config().dotfiles_home_dir()).unwrap();
+
+        let err = plan_install(&context).unwrap_err().to_string();
+
+        assert!(err.contains("failed to collect all files"));
     }
 }

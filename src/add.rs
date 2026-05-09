@@ -32,7 +32,10 @@ pub fn plan_add(context: &CommandContext, path: impl AsRef<Path>) -> Result<Vec<
         FileKind::Error => {
             return Err(anyhow!("cannot determine file kind of {}.", path.display()));
         }
-        FileKind::NotFound | FileKind::File => {}
+        FileKind::NotFound => {
+            return Err(anyhow!("{} does not exist.", path.display()));
+        }
+        FileKind::File => {}
     }
 
     let path = path
@@ -136,5 +139,16 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
 
         assert!(plan_add(&context, &source).is_err());
+    }
+
+    #[test]
+    fn rejects_not_found_path() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let source = context.config().home_dir().join(".missing");
+
+        let err = plan_add(&context, &source).unwrap_err().to_string();
+
+        assert!(err.contains("does not exist"));
     }
 }
