@@ -337,11 +337,11 @@ mod tests {
         fs::remove_file(&target).unwrap();
         fs::write(&target, "local2").unwrap();
 
-        let err = install(&context, ExecutionMode::Real)
-            .unwrap_err()
-            .to_string();
+        let err = install(&context, ExecutionMode::Real).unwrap_err();
+        let message = format!("{err:#}");
 
-        assert!(err.contains("backup destination already exists"));
+        assert!(message.contains("failed to execute action: backup path"));
+        assert!(message.contains("backup destination already exists"));
         assert_eq!(fs::read_to_string(backup).unwrap(), "local1");
     }
 
