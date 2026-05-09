@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::file_operations::{copy, create_symlink, remove_file, remove_symlink, rename};
+use crate::file_operations::{
+    copy, create_symlink, remove_file, remove_symlink, rename_without_overwrite,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionMode {
@@ -60,7 +62,7 @@ fn execute_real(action: &Action, output: ActionOutput) -> Result<()> {
             println!("created link: {} -> {}", from.display(), to.display());
         }
         Action::BackupPath { from, to } => {
-            rename(from, to)?;
+            rename_without_overwrite(from, to)?;
             println!("backed up: {} -> {}", from.display(), to.display());
         }
         Action::RemoveSymlink { path } => {

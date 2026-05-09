@@ -43,9 +43,10 @@ backup_dir = "/path/to/backup_dir"
 | ---- | ---- |
 | `dotfiles` | dotfiles リポジトリのルート．`dotfiles/home/` 配下が `$HOME` のミラーとして扱われる |
 | `home` | 実際にリンクを貼りたい `$HOME` ルート |
-| `backup_dir` | リンク作成時に上書き対象ファイルやディレクトリを退避するルート．`YYYYmmdd_HHMM` サブディレクトリが自動生成される |
+| `backup_dir` | リンク作成時に上書き対象ファイルやディレクトリを退避するルート．`YYYYmmdd_HHMMSS` サブディレクトリが自動生成され，衝突時は suffix が付く |
 
-設定ファイルを読み込む場合，`dotfiles`，`home`，`backup_dir` は読み込み時に canonicalize されるため，指定先は事前に存在している必要がある．
+設定ファイルを読み込む場合，`dotfiles`，`home`，`dotfiles/home` は読み込み時に canonicalize されるため，指定先は事前に存在している必要がある．
+`backup_dir` は存在しなくてもよい．存在する場合はディレクトリである必要があり，通常ファイルなどの場合はエラーにする．
 fallback を使う場合，`$HOME/.dotfiles/home` は事前に存在している必要がある．`$HOME/.backup_dotfiles` は存在しなくてもよい．
 
 ### ディレクトリ構成例
@@ -73,7 +74,8 @@ dotkoke [OPTIONS] <COMMAND>
 ### install
 
 `dotfiles/home/` 以下を走査して，対応する `$HOME` 側にシンボリックリンクを作成する．
-既存ファイルまたはディレクトリが存在する場合，`backup_dir/YYYYmmdd_HHMM/...` へ移動してからリンクを作成する．
+既存ファイルまたはディレクトリが存在する場合，`backup_dir/YYYYmmdd_HHMMSS/...` へ移動してからリンクを作成する．
+同じ秒のバックアップ先が既に存在する場合は，`YYYYmmdd_HHMMSS-1`，`YYYYmmdd_HHMMSS-2` のように suffix を付ける．
 
 ```sh
 dotkoke install [--dry-run] [--show-skipped]
@@ -85,6 +87,7 @@ dotkoke install [--dry-run] [--show-skipped]
 `dotfiles/home/` 以下にシンボリックリンクがある場合，それらはリンク作成対象にせず，警告して無視する．
 `$HOME` 側に既に正しいシンボリックリンクがある場合はスキップする．
 `$HOME` 側に別のシンボリックリンクがある場合は削除してからリンクを作成する．
+作成先の親パスに通常ファイル，シンボリックリンク，不明なファイル種別，判定不能なパスがある場合はエラーにする．
 
 ### add <PATH>
 
