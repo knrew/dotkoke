@@ -23,7 +23,7 @@ enum Command {
     /// unimplemented
     Init {},
 
-    /// dotifiles/home以下のファイルのリンクを$HOMEに貼る．
+    /// dotfiles/home以下のファイルのリンクを$HOMEに貼る．
     Install {
         #[arg(long)]
         dry_run: bool,
@@ -197,6 +197,7 @@ fn execution_mode(dry_run: bool) -> ExecutionMode {
 mod tests {
     use std::fs;
 
+    use clap::CommandFactory;
     use tempfile::TempDir;
 
     use super::*;
@@ -228,6 +229,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(source, ConfigSource::File(cli_config));
+    }
+
+    #[test]
+    fn install_help_uses_dotfiles_spelling() {
+        let help = Cli::command().render_long_help().to_string();
+
+        assert!(help.contains("dotfiles/home"));
+        assert!(!help.contains("dotifiles"));
     }
 
     #[test]

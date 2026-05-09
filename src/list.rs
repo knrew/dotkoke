@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 
 use crate::{config::Config, file_collector::collect_files_and_links};
@@ -13,10 +15,37 @@ pub fn list(config: &Config) -> Result<()> {
         eprintln!("[warning] {warning}");
     }
 
-    println!("managed file(s):");
-    for file in collected.files {
-        println!("  {}", file.display());
-    }
+    print!("{}", list_stdout(&collected.files));
 
     Ok(())
+}
+
+fn list_stdout(files: &[PathBuf]) -> String {
+    let mut output = String::from("managed file(s):\n");
+
+    for file in files {
+        output.push_str(&format!("  {}\n", file.display()));
+    }
+
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn list_stdout_uses_absolute_paths() {
+        let files = vec![
+            PathBuf::from("/dotfiles/home/.config/app/config.toml"),
+            PathBuf::from("/dotfiles/home/.zshrc"),
+        ];
+
+        assert_eq!(
+            list_stdout(&files),
+            "managed file(s):\n  /dotfiles/home/.config/app/config.toml\n  /dotfiles/home/.zshrc\n"
+        );
+    }
 }

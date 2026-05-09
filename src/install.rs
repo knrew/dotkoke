@@ -67,12 +67,9 @@ pub fn plan_install(context: &CommandContext) -> Result<Vec<Action>> {
         actions.push(Action::Warn { message: warning });
     }
 
-    if !collected.links.is_empty() {
+    for link in collected.links {
         actions.push(Action::Warn {
-            message: format!(
-                "symlink(s) exist in {} (they will be ignored).",
-                context.config().dotfiles_home_dir().display()
-            ),
+            message: format!("symlink ignored: {}", link.display()),
         });
     }
 
@@ -548,5 +545,29 @@ mod tests {
         let err = plan_install(&context).unwrap_err().to_string();
 
         assert!(err.contains("failed to collect all files"));
+    }
+
+    #[test]
+    fn warns_ignored_symlink_with_path() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let link = context.config().dotfiles_home_dir().join("linked");
+        let target = context.config().dotfiles_home_dir().join("target");
+
+        fs::write(&target, "managed").unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert_eq!(
+            plan_install(&context).unwrap(),
+            vec![
+                Action::Warn {
+                    message: format!("symlink ignored: {}", link.display()),
+                },
+                Action::CreateSymlink {
+                    from: target,
+                    to: context.config().home_dir().join("target"),
+                },
+            ]
+        );
     }
 }
