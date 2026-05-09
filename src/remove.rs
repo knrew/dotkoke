@@ -182,6 +182,25 @@ mod tests {
     }
 
     #[test]
+    fn removes_home_symlink_with_loop_destination() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let managed = context.config().dotfiles_home_dir().join(".zshrc");
+        let home = context.config().home_dir().join(".zshrc");
+
+        fs::write(&managed, "managed").unwrap();
+        symlink(&home, &home).unwrap();
+
+        assert_eq!(
+            plan_remove(&context, &managed).unwrap(),
+            vec![
+                Action::RemoveSymlink { path: home },
+                Action::RemoveManagedFile { path: managed },
+            ]
+        );
+    }
+
+    #[test]
     fn plans_managed_file_removal_when_home_parent_is_not_a_directory() {
         let root = TempDir::new().unwrap();
         let context = context(&root);
