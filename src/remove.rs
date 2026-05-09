@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::{
     action::{Action, ExecutionMode, execute_actions},
-    file_kind::{FileKind, file_kind, is_broken_link, is_symlink_pointing_to},
+    file_kind::{FileKind, broken_link_status, file_kind, is_symlink_pointing_to},
     install::CommandContext,
     paths::PathResolver,
 };
@@ -30,7 +30,10 @@ pub fn plan_remove(context: &CommandContext, path: impl AsRef<Path>) -> Result<V
         FileKind::Error => {
             return Err(anyhow!("cannot determine file kind of {}.", path.display()));
         }
-        FileKind::NotFound | FileKind::File => {}
+        FileKind::NotFound => {
+            return Err(anyhow!("{} does not exist.", path.display()));
+        }
+        FileKind::File => {}
     }
 
     let path = path
@@ -48,7 +51,7 @@ pub fn plan_remove(context: &CommandContext, path: impl AsRef<Path>) -> Result<V
     let to = PathResolver::new(context.config()).install_path(&path)?;
     let mut actions = Vec::new();
 
-    if is_symlink_pointing_to(&to, &path) || is_broken_link(&to) {
+    if is_symlink_pointing_to(&to, &path)? || broken_link_status(&to)? {
         actions.push(Action::RemoveSymlink { path: to });
     }
 
@@ -118,5 +121,35 @@ mod tests {
             plan_remove(&context, &managed).unwrap(),
             vec![Action::RemoveManagedFile { path: managed }]
         );
+    }
+
+    #[test]
+    fn removes_broken_home_symlink() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let managed = context.config().dotfiles_home_dir().join(".zshrc");
+        let home = context.config().home_dir().join(".zshrc");
+
+        fs::write(&managed, "managed").unwrap();
+        symlink(context.config().home_dir().join(".missing"), &home).unwrap();
+
+        assert_eq!(
+            plan_remove(&context, &managed).unwrap(),
+            vec![
+                Action::RemoveSymlink { path: home },
+                Action::RemoveManagedFile { path: managed },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_not_found_path() {
+        let root = TempDir::new().unwrap();
+        let context = context(&root);
+        let managed = context.config().dotfiles_home_dir().join(".missing");
+
+        let err = plan_remove(&context, &managed).unwrap_err().to_string();
+
+        assert!(err.contains("does not exist"));
     }
 }

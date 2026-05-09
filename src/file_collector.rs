@@ -3,9 +3,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::file_kind::*;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectedFiles {
+    pub files: Vec<PathBuf>,
+    pub links: Vec<PathBuf>,
+    pub warnings: Vec<String>,
+}
 
 /// 指定したパス以下を再帰的に探索し，通常ファイルとシンボリックリンク(壊れたリンクを含む)を収集する．
 ///
@@ -15,18 +22,20 @@ use crate::file_kind::*;
 ///
 /// # 返り値
 ///
-/// `(files, links)`のタプル:
+/// `CollectedFiles`:
 /// - `files`: 通常ファイルのパス一覧
 /// - `links`: シンボリックリンクのパス一覧
+/// - `warnings`: 個別 entry の読み取り失敗など，走査を継続できる警告の一覧
 ///
 /// # NOTE
 /// - 引数で指定したパスが `files` または `links` に入る可能性がある．
 /// - シンボリックリンク，通常ファイル，ディレクトリのどれでもないパスは
-///   `Unknown file` として警告を出力して無視する．
+///   警告として収集して無視する．
 /// - ディレクトリへのシンボリックリンクは辿らない．
-pub fn collect_files_and_links(path: impl AsRef<Path>) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+pub fn collect_files_and_links(path: impl AsRef<Path>) -> Result<CollectedFiles> {
     let mut files = vec![];
     let mut links = vec![];
+    let mut warnings = vec![];
 
     let mut stack = vec![path.as_ref().to_path_buf()];
 
@@ -44,26 +53,27 @@ pub fn collect_files_and_links(path: impl AsRef<Path>) -> Result<(Vec<PathBuf>, 
                     for entry in entries {
                         match entry {
                             Ok(e) => stack.push(e.path()),
-                            Err(e) => eprintln!(
-                                "[warning] failed to read entry in {}: {}",
+                            Err(e) => warnings.push(format!(
+                                "failed to read entry in {}: {}",
                                 path.display(),
                                 e
-                            ),
+                            )),
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("[warning] failed to read_dir {}: {}", path.display(), e);
+                    return Err(e)
+                        .with_context(|| format!("failed to read directory: {}", path.display()));
                 }
             },
             FileKind::Unknown => {
-                eprintln!("[warning] unknown file type: {}", path.display());
+                warnings.push(format!("unknown file type: {}", path.display()));
             }
             FileKind::Error => {
-                eprintln!("[warning] error path: {}", path.display());
+                warnings.push(format!("cannot determine file kind of {}", path.display()));
             }
             FileKind::NotFound => {
-                eprintln!("[warning] not found: {}", path.display());
+                warnings.push(format!("not found: {}", path.display()));
             }
         }
     }
@@ -72,8 +82,14 @@ pub fn collect_files_and_links(path: impl AsRef<Path>) -> Result<(Vec<PathBuf>, 
     files.dedup();
     links.sort_unstable();
     links.dedup();
+    warnings.sort_unstable();
+    warnings.dedup();
 
-    Ok((files, links))
+    Ok(CollectedFiles {
+        files,
+        links,
+        warnings,
+    })
 }
 
 #[cfg(test)]
@@ -98,10 +114,11 @@ mod tests {
         fs::write(&nested_file, "config").unwrap();
         symlink(&nested_file, &symlink_path).unwrap();
 
-        let (files, links) = collect_files_and_links(&base).unwrap();
+        let collected = collect_files_and_links(&base).unwrap();
 
-        assert_eq!(files, vec![nested_file, file]);
-        assert_eq!(links, vec![symlink_path]);
+        assert_eq!(collected.files, vec![nested_file, file]);
+        assert_eq!(collected.links, vec![symlink_path]);
+        assert!(collected.warnings.is_empty());
     }
 
     #[test]
@@ -113,9 +130,25 @@ mod tests {
         fs::create_dir_all(&base).unwrap();
         symlink(base.join("missing"), &symlink_path).unwrap();
 
-        let (files, links) = collect_files_and_links(&base).unwrap();
+        let collected = collect_files_and_links(&base).unwrap();
 
-        assert!(files.is_empty());
-        assert_eq!(links, vec![symlink_path]);
+        assert!(collected.files.is_empty());
+        assert_eq!(collected.links, vec![symlink_path]);
+        assert!(collected.warnings.is_empty());
+    }
+
+    #[test]
+    fn collects_not_found_as_warning() {
+        let root = TempDir::new().unwrap();
+        let missing = root.path().join("missing");
+
+        let collected = collect_files_and_links(&missing).unwrap();
+
+        assert!(collected.files.is_empty());
+        assert!(collected.links.is_empty());
+        assert_eq!(
+            collected.warnings,
+            vec![format!("not found: {}", missing.display())]
+        );
     }
 }

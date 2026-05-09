@@ -85,7 +85,8 @@ dotkoke install [--dry-run] [--show-skipped]
 - `--show-skipped`: 既に正しいリンクが存在するためスキップしたファイルも表示する．
 
 `dotfiles/home/` 以下にシンボリックリンクがある場合，それらはリンク作成対象にせず，警告して無視する．
-`$HOME` 側に既に正しいシンボリックリンクがある場合はスキップする．
+`dotfiles/home/` の走査中に判定不能なパスがある場合は，不完全な install を避けるためエラーにする．
+`$HOME` 側に既に管理元ファイルの canonical path を指す正しいシンボリックリンクがある場合はスキップする．
 `$HOME` 側に別のシンボリックリンクがある場合は削除してからリンクを作成する．
 作成先の親パスに通常ファイル，シンボリックリンク，不明なファイル種別，判定不能なパスがある場合はエラーにする．
 
@@ -94,6 +95,7 @@ dotkoke install [--dry-run] [--show-skipped]
 `$HOME` から `dotfiles/home/` 以下へファイルを取り込む．
 対象は `$HOME` 配下の通常ファイルのみで，シンボリックリンクは取り込み対象外としてスキップする．
 既に同名ファイルが dotfiles 管理対象に存在する場合は上書きせずにスキップする．
+存在しないパスを指定した場合はエラーにする．
 
 ```sh
 dotkoke add [--dry-run] <PATH>
@@ -111,6 +113,8 @@ dotkoke add --dry-run /home/username/.config/git/config
 `dotfiles/home/` から管理ファイルを削除し，必要に応じて `$HOME` 側の対応するシンボリックリンクも削除する．
 対象は `dotfiles/home/` 配下の通常ファイルのみである．
 `$HOME` 側のリンクが別の管理ファイルを指している場合は削除しない．
+`$HOME` 側の対応パスがリンク先の存在しない壊れたシンボリックリンクの場合は削除する．
+存在しないパスを指定した場合はエラーにする．
 
 ```sh
 dotkoke remove [--dry-run] <PATH>
@@ -127,6 +131,7 @@ dotkoke remove --dry-run /path/to/dotfiles/home/.config/git/config
 
 現在管理している通常ファイルの一覧を表示する．
 `dotfiles/home/` 以下のシンボリックリンクは管理ファイル一覧に含めない．
+走査不能なディレクトリがある場合はエラーにする．個別 entry の読み取り失敗など継続可能な問題は警告を出して一覧表示を続行する．
 
 ```sh
 dotkoke list
