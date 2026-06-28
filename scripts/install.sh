@@ -289,6 +289,9 @@ binary_path=$extract_dir/$APP_NAME-$version-$target/$APP_NAME
 mkdir -p "$install_dir" || fail "failed to create $install_dir; use --to <writable-dir>"
 [ -d "$install_dir" ] || fail "$install_dir is not a directory"
 
+install_path=$install_dir/$APP_NAME
+[ ! -d "$install_path" ] || fail "$install_path already exists and is a directory"
+
 install_tmp=$install_dir/.$APP_NAME.tmp.$$
 
 if ! cp "$binary_path" "$install_tmp"; then
@@ -299,12 +302,12 @@ if ! chmod 0755 "$install_tmp"; then
   fail "failed to set executable permissions"
 fi
 
-if ! mv "$install_tmp" "$install_dir/$APP_NAME"; then
+if ! mv "$install_tmp" "$install_path"; then
   fail "failed to install $APP_NAME into $install_dir"
 fi
 install_tmp=
 
-say "Installed $APP_NAME to $install_dir/$APP_NAME"
+say "Installed $APP_NAME to $install_path"
 
 if ! path_contains "$install_dir"; then
   warn "$install_dir is not in PATH; add it before running $APP_NAME"
