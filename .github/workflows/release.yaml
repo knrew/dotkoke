@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v[0-9]*.[0-9]*.[0-9]*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, such as v0.1.0.
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ env.VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Validate release version
+        run: |
+          set -eu
+          printf '%s\n' "${VERSION}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
+          manifest_version=$(
+            cargo metadata --format-version=1 --no-deps |
+              python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])'
+          )
+          tag_version=${VERSION#v}
+          if [ "${manifest_version}" != "${tag_version}" ]; then
+            echo "Cargo.toml version ${manifest_version} does not match tag ${VERSION}" >&2
+            exit 1
+          fi
+      - name: Cargo fmt
+        run: cargo fmt --all --check --verbose
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-features -- -D warnings
+      - name: Cargo test
+        run: cargo test --workspace --all-features --no-fail-fast --verbose
+      - name: Cargo check release
+        run: cargo check --release --workspace --all-targets --all-features --verbose
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ env.VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install macOS packaging tools
+        if: runner.os == 'macOS'
+        run: brew install xz
+      - name: Install Linux musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+      - name: Build release binary
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+      - name: Package archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="dotkoke-${VERSION}-${{ matrix.target }}"
+          mkdir -p "dist/${package}"
+          cp "target/${{ matrix.target }}/release/dotkoke" "dist/${package}/dotkoke"
+          cp README.md LICENSE "dist/${package}/"
+          chmod 0755 "dist/${package}/dotkoke"
+          tar -cf - -C dist "${package}" | xz -z -c > "dist/${package}.tar.xz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dotkoke-${{ env.VERSION }}-${{ matrix.target }}
+          path: dist/dotkoke-${{ env.VERSION }}-${{ matrix.target }}.tar.xz
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ env.VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dotkoke-${{ env.VERSION }}-*
+          merge-multiple: true
+      - name: Prepare release assets
+        run: |
+          set -eu
+          cd dist
+          sha256sum dotkoke-"${VERSION}"-*.tar.xz > SHA256SUMS
+          cd ..
+          sed "s/^DEFAULT_VERSION=__DOTKOKE_VERSION__$/DEFAULT_VERSION=${VERSION}/" scripts/install.sh > dist/install.sh
+          grep -Fx "DEFAULT_VERSION=${VERSION}" dist/install.sh
+          grep -F '[ "$version" = "__DOTKOKE_VERSION__" ]' dist/install.sh
+          sh -n dist/install.sh
+          chmod 0755 dist/install.sh
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "${VERSION}" \
+            dist/install.sh \
+            dist/SHA256SUMS \
+            dist/dotkoke-"${VERSION}"-*.tar.xz \
+            --draft \
+            --generate-notes \
+            --title "${VERSION}" \
+            --verify-tag
