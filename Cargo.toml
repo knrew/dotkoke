@@ -1,9 +1,12 @@
 [package]
 authors     = ["knrew"]
-description = ""
+description = "A dotfiles manager for Unix-like systems"
 edition     = "2024"
 license     = "MIT"
 name        = "dotkoke"
+publish     = false
+readme      = "README.md"
+repository  = "https://github.com/knrew/dotkoke"
 version     = "0.1.0"
 
 [dependencies]
