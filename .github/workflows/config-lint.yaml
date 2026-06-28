@@ -49,3 +49,30 @@ jobs:
         run: pip install "yamllint==${YAMLLINT_VERSION}"
       - name: Check YAML formatting
         run: yamllint .
+
+  shell:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      SHELLCHECK_VERSION: 0.11.0
+      SHFMT_VERSION: 3.13.1
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install ShellCheck
+        run: |
+          curl -fsSL \
+            -o /tmp/shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          tar -C /tmp -xf /tmp/shellcheck.tar.xz
+          sudo install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+      - name: Install shfmt
+        run: |
+          curl -fsSL \
+            -o /tmp/shfmt \
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+          sudo install -m 0755 /tmp/shfmt /usr/local/bin/shfmt
+      - name: Check shell scripts
+        run: bash .github/scripts/lint-sh-bash.sh
