@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - v[0-9]+.[0-9]+.[0-9]+
+      - v[0-9]*.[0-9]*.[0-9]*
   workflow_dispatch:
     inputs:
       tag:
@@ -134,7 +134,10 @@ jobs:
           cd dist
           sha256sum dotkoke-"${VERSION}"-*.tar.xz > SHA256SUMS
           cd ..
-          sed "s/__DOTKOKE_VERSION__/${VERSION}/g" scripts/install.sh > dist/install.sh
+          sed "s/^DEFAULT_VERSION=__DOTKOKE_VERSION__$/DEFAULT_VERSION=${VERSION}/" scripts/install.sh > dist/install.sh
+          grep -Fx "DEFAULT_VERSION=${VERSION}" dist/install.sh
+          grep -F '[ "$version" = "__DOTKOKE_VERSION__" ]' dist/install.sh
+          sh -n dist/install.sh
           chmod 0755 dist/install.sh
       - name: Create GitHub Release
         env:
